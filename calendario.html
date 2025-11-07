@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Planner — Calendário Editável</title>
+<style>
+  :root{
+    --bg:#0f1724;
+    --card:#0b1220;
+    --accent:#7c3aed;
+    --muted:#9aa4b2;
+    --text:#e6eef6;
+    --today:#10388f;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;color:var(--text);background:linear-gradient(180deg,#071025 0%, #081428 60%);-webkit-font-smoothing:antialiased}
+  .app{
+    max-width:1200px;margin:24px auto;padding:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border-radius:12px;box-shadow: 0 8px 30px rgba(2,6,23,0.7);
+  }
+  header{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  h1{font-size:20px;margin:0;font-weight:600}
+  .controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+  button{
+    background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer;
+  }
+  button.primary{background:linear-gradient(90deg,var(--accent),#4c1d95);border:none}
+  .month-title{font-weight:600;font-size:16px;letter-spacing:0.2px}
+  .calendar{
+    display:grid;
+    grid-template-rows:auto 1fr;
+    gap:12px;
+  }
+  .weekdays{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:6px;
+    font-size:13px;
+    color:var(--muted);
+    padding:6px;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:8px;
+    align-items:start;
+  }
+  .cell{
+    background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));
+    border-radius:10px;
+    min-height:140px;
+    padding:10px;
+    border:1px solid rgba(255,255,255,0.03);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .cell.dim{opacity:0.45}
+  .cell .daynum{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+  .cell .daynum .num{font-size:18px}
+  .today{
+    box-shadow: 0 0 0 2px rgba(16,56,143,0.15), inset 0 -2px 0 rgba(124,58,237,0.06);
+    border:1px solid rgba(124,58,237,0.18);
+  }
+  .entries{
+    flex:1;overflow:auto;padding-right:6px;
+  }
+  .entry{
+    background:rgba(255,255,255,0.03);border-radius:8px;padding:6px 8px;margin-bottom:8px;font-size:13px;cursor:text;
+  }
+  .entry[contenteditable="true"]:focus{outline:2px dashed rgba(124,58,237,0.16)}
+  .add-hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .toolbar{display:flex;gap:8px;align-items:center}
+  .small{font-size:13px;padding:6px 8px}
+  .view-toggle{display:flex;gap:6px}
+  .week-mode .grid{grid-auto-rows:1fr}
+  /* week view: highlight the selected week and make cells taller */
+  .week-mode .cell{min-height:220px}
+  /* responsive */
+  @media (max-width:900px){
+    .app{margin:12px}
+    .cell{min-height:110px;padding:8px}
+  }
+  footer{margin-top:12px;color:var(--muted);font-size:13px;text-align:right}
+</style>
+</head>
+<body>
+<div class="app" role="application" aria-label="Planner">
+  <header>
+    <div>
+      <h1>Planner — Calendário editável</h1>
+      <div style="color:var(--muted);font-size:13px">Clique nos blocos para escrever. Duplo clique para adicionar um evento rápido.</div>
+    </div>
+
+    <div class="controls">
+      <div class="toolbar">
+        <button id="prev" title="Mês anterior">◀</button>
+        <button id="todayBtn" class="small" title="Hoje">Hoje</button>
+        <button id="next" title="Próximo mês">▶</button>
+      </div>
+      <div style="width:10px"></div>
+      <div class="view-toggle" role="tablist" aria-label="Alternar vista">
+        <button id="monthView" class="small primary" aria-pressed="true">Mês</button>
+        <button id="weekView" class="small" aria-pressed="false">Semana</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="calendar">
+    <div style="display:flex;align-items:center;gap:14px">
+      <div class="month-title" id="monthTitle">—</div>
+      <div style="color:var(--muted);font-size:13px" id="rangeInfo"></div>
+    </div>
+
+    <div class="weekdays" id="weekdays">
+      <!-- semana -->
+    </div>
+
+    <div class="grid" id="grid">
+      <!-- células -->
+    </div>
+
+  </div>
+
+  <footer>
+    Salvo automaticamente no seu navegador.
+  </footer>
+</div>
+
+<script>
+/*
+ Planner.js - Single file
+ - Renderiza um calendário mensal
+ - Áreas editáveis por dia
+ - Salva/recupera do localStorage por data (YYYY-MM-DD)
+ - Toggle mês/semana
+ - Duplo clique: adiciona evento
+*/
+
+const grid = document.getElementById('grid');
+const weekdaysEl = document.getElementById('weekdays');
+const monthTitle = document.getElementById('monthTitle');
+const rangeInfo = document.getElementById('rangeInfo');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const todayBtn = document.getElementById('todayBtn');
+const monthViewBtn = document.getElementById('monthView');
+const weekViewBtn = document.getElementById('weekView');
+const app = document.querySelector('.app');
+
+let today = new Date();
+let viewYear = today.getFullYear();
+let viewMonth = today.getMonth(); // 0-11
+let weekMode = false;
+let selectedWeekStart = null;
+
+const weekdays = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+function formatDateYMD(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function saveEntry(dateStr, html){
+  // html is innerHTML of .entries
+  localStorage.setItem('planner-'+dateStr, html);
+}
+function loadEntry(dateStr){
+  return localStorage.getItem('planner-'+dateStr) || '';
+}
+
+function buildWeekdays(){
+  weekdaysEl.innerHTML = '';
+  for(let i=0;i<7;i++){
+    const el = document.createElement('div');
+    el.textContent = weekdays[i];
+    weekdaysEl.appendChild(el);
+  }
+}
+
+function startOfWeek(date){
+  const d = new Date(date);
+  const diff = d.getDate() - d.getDay(); // sunday-based
+  return new Date(d.getFullYear(), d.getMonth(), diff);
+}
+
+function renderCalendar(year, month){
+  grid.innerHTML = '';
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month+1, 0);
+  const startDayIndex = first.getDay(); // 0..6
+  // start from the Sunday before (or the same day)
+  const startDate = new Date(year, month, 1 - startDayIndex);
+  // total cells: 6 rows x 7 = 42 (safe)
+  const total = 42;
+  monthTitle.textContent = first.toLocaleString('pt-BR', {month:'long', year:'numeric'});
+  rangeInfo.textContent = `${first.toLocaleString('pt-BR', {month:'long'})} • ${year}`;
+
+  for(let i=0;i<total;i++){
+    const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    if(d.getMonth() !== month) cell.classList.add('dim');
+    // today's highlight
+    const isToday = d.toDateString() === (new Date()).toDateString();
+    if(isToday) cell.classList.add('today');
+
+    const dayHeader = document.createElement('div');
+    dayHeader.className = 'daynum';
+    dayHeader.innerHTML = `<span class="num">${d.getDate()}</span><span style="font-size:11px;color:var(--muted)">${weekdays[d.getDay()]}</span>`;
+    cell.appendChild(dayHeader);
+
+    const entries = document.createElement('div');
+    entries.className = 'entries';
+    entries.setAttribute('data-date', formatDateYMD(d));
+    entries.contentEditable = true;
+    entries.spellcheck = false;
+
+    // load saved content (HTML)
+    entries.innerHTML = loadEntry(formatDateYMD(d)) || `<div class="add-hint">Duplo clique para +evento<br>ou escreva aqui...</div>`;
+
+    // save on input (debounce)
+    let saveTimer = null;
+    entries.addEventListener('input', () => {
+      if(saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(()=>{
+        saveEntry(entries.getAttribute('data-date'), entries.innerHTML);
+      }, 450);
+    });
+
+    // double click -> quick add event
+    entries.addEventListener('dblclick', (e) => {
+      // avoid creating when double-clicking existing text selection weirdness
+      const dateKey = entries.getAttribute('data-date');
+      const text = prompt('Adicionar evento rápido (texto):');
+      if(text && text.trim()){
+        const ev = document.createElement('div');
+        ev.className = 'entry';
+        ev.contentEditable = true;
+        ev.innerText = text.trim();
+        entries.insertBefore(ev, entries.firstChild);
+        saveEntry(dateKey, entries.innerHTML);
+        // focus to the new event for quick edit
+        requestAnimationFrame(()=> ev.focus());
+      }
+    });
+
+    // helpful: when pressing Ctrl+Enter inside an entry, save immediately
+    entries.addEventListener('keydown', (ev) => {
+      if((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter'){
+        ev.preventDefault();
+        saveEntry(entries.getAttribute('data-date'), entries.innerHTML);
+        // small visual feedback
+        entries.style.transition = 'box-shadow 0.15s';
+        entries.style.boxShadow = '0 0 0 2px rgba(124,58,237,0.08)';
+        setTimeout(()=> entries.style.boxShadow = '', 350);
+      }
+    });
+
+    // context menu: limpar dia
+    entries.addEventListener('contextmenu', (ev)=>{
+      ev.preventDefault();
+      const dateKey = entries.getAttribute('data-date');
+      if(confirm(`Limpar conteúdo do dia ${dateKey}?`)){
+        localStorage.removeItem('planner-'+dateKey);
+        entries.innerHTML = `<div class="add-hint">Duplo clique para +evento<br>ou escreva aqui...</div>`;
+      }
+    });
+
+    cell.appendChild(entries);
+    grid.appendChild(cell);
+  }
+
+  // if week mode active, restrict to selected week
+  if(weekMode){
+    if(!selectedWeekStart) selectedWeekStart = startOfWeek(new Date(year, month, today.getDate()));
+    applyWeekView(selectedWeekStart);
+  }
+}
+
+function applyWeekView(weekStart){
+  // weekStart is a Date at Sunday
+  // find all cells and hide those not in the week
+  const cells = Array.from(grid.children);
+  for(const c of cells){
+    const entries = c.querySelector('.entries');
+    if(!entries) continue;
+    const dateKey = entries.getAttribute('data-date');
+    const cellDate = new Date(dateKey + 'T00:00:00');
+    const diff = Math.floor((cellDate - weekStart)/(24*3600*1000));
+    if(diff >=0 && diff < 7){
+      c.style.display = 'flex';
+    } else {
+      c.style.display = 'none';
+    }
+  }
+  // shade header weekdays to correspond to the chosen week
+  for(let i=0;i<7;i++){
+    const w = weekdaysEl.children[i];
+    const labelDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i);
+    w.textContent = `${weekdays[i]} ${labelDate.getDate()}`;
+  }
+}
+
+function clearWeekFilter(){
+  const cells = Array.from(grid.children);
+  for(const c of cells){
+    c.style.display = '';
+  }
+  // restore weekdays simple
+  for(let i=0;i<7;i++){
+    weekdaysEl.children[i].textContent = weekdays[i];
+  }
+}
+
+prevBtn.addEventListener('click', ()=>{
+  viewMonth--;
+  if(viewMonth < 0){ viewMonth = 11; viewYear--; }
+  selectedWeekStart = null;
+  renderCalendar(viewYear, viewMonth);
+});
+nextBtn.addEventListener('click', ()=>{
+  viewMonth++;
+  if(viewMonth > 11){ viewMonth = 0; viewYear++; }
+  selectedWeekStart = null;
+  renderCalendar(viewYear, viewMonth);
+});
+todayBtn.addEventListener('click', ()=>{
+  const d = new Date();
+  viewYear = d.getFullYear();
+  viewMonth = d.getMonth();
+  selectedWeekStart = null;
+  renderCalendar(viewYear, viewMonth);
+});
+monthViewBtn.addEventListener('click', ()=>{
+  weekMode = false;
+  app.classList.remove('week-mode');
+  monthViewBtn.classList.add('primary');
+  monthViewBtn.setAttribute('aria-pressed','true');
+  weekViewBtn.classList.remove('primary');
+  weekViewBtn.setAttribute('aria-pressed','false');
+  clearWeekFilter();
+  buildWeekdays();
+  renderCalendar(viewYear, viewMonth);
+});
+weekViewBtn.addEventListener('click', ()=>{
+  weekMode = true;
+  app.classList.add('week-mode');
+  weekViewBtn.classList.add('primary');
+  weekViewBtn.setAttribute('aria-pressed','true');
+  monthViewBtn.classList.remove('primary');
+  monthViewBtn.setAttribute('aria-pressed','false');
+  // choose the week that contains "today" or the 1st of current month
+  selectedWeekStart = startOfWeek(new Date(viewYear, viewMonth, today.getDate()));
+  buildWeekdays();
+  renderCalendar(viewYear, viewMonth);
+});
+
+// keyboard navigation
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'ArrowLeft' && (e.ctrlKey || e.metaKey)){
+    prevBtn.click();
+  } else if(e.key === 'ArrowRight' && (e.ctrlKey || e.metaKey)){
+    nextBtn.click();
+  } else if(e.key === 't' && (e.ctrlKey || e.metaKey)){
+    todayBtn.click();
+  }
+});
+
+// initial
+buildWeekdays();
+renderCalendar(viewYear, viewMonth);
+
+// small extra: export/import (via console) for power users
+window.exportPlanner = function(){
+  const dump = {};
+  for(const k in localStorage){
+    if(k.startsWith('planner-')) dump[k] = localStorage[k];
+  }
+  return dump;
+};
+window.importPlanner = function(obj){
+  for(const k in obj) localStorage.setItem(k, obj[k]);
+  alert('Import feito. Recarregue a página.');
+};
+
+</script>
+</body>
+</html>
